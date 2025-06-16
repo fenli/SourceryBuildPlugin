@@ -1,0 +1,53 @@
+name: Update Sourcery Version
+
+on:
+  schedule:
+    cron: '0 0 * * 1'  # Every Monday at 00:00 UTC
+  workflow_dispatch:
+
+jobs:
+  update-sourcery:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Check for latest release
+      id: fetch_latest
+      run: |
+        latest_release=$(curl --silent "https://api.github.com/repos/krzysztofzablocki/Sourcery/releases/latest" | jq -r '.tag_name')
+        echo "Latest release: $latest_release"
+        echo "::set-output name=latest_release::$latest_release"
+
+        binary_url="https://github.com/krzysztofzablocki/Sourcery/releases/download/${latest_release}/sourcery-${latest_release}.artifactbundle.zip"
+        checksum=$(curl -L $binary_url | shasum -a 256 | awk '{ print $1 }')
+        echo "Binary URL: $binary_url"
+        echo "Checksum: $checksum"
+        echo "::set-output name=binary_url::$binary_url"
+        echo "::set-output name=checksum::$checksum"
+
+    - name: Update Package.swift
+      id: update_package_swift
+      run: |
+        binary_url=${{ steps.fetch_latest.outputs.binary_url }}
+        checksum=${{ steps.fetch_latest.outputs.checksum }}
+        sed -i 's|url: "https://github.com/krzysztofzablocki/Sourcery/releases/download/.*"|url: "'"${binary_url}"'"|' Package.swift
+        sed -i 's|checksum: ".*"|checksum: "'"${checksum}"'"|' Package.swift
+        if git diff --quiet; then
+          echo "No changes detected"
+          echo "::set-output name=changes_detected::false"
+        else
+          echo "Changes detected"
+          echo "::set-output name=changes_detected::true"
+        fi
+
+    - name: Commit and Push changes
+      if: steps.update_package_swift.outputs.changes_detected == 'true'
+      run: |
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        git add Package.swift
+        git commit -m "Update Sourcery binary version to ${{ steps.fetch_latest.outputs.latest_release }}"
+        git push
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
