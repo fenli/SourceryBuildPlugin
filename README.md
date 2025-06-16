@@ -1,6 +1,4 @@
 # SourceryBuildPlugin
-
-# SourceryStencilPacks
 > SPM and Xcode Build plugins to run Sourcery binary easier.
 > Learn more about it from the Sourcery [here](https://github.com/krzysztofzablocki/Sourcery).
 
