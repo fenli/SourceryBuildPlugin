@@ -1,11 +1,11 @@
 # SourceryBuildPlugin
-> SPM and Xcode Build plugins to run Sourcery binary easier.
+> SPM and Xcode Build plugins to run Sourcery CLI easier.
 > Learn more about it from the Sourcery [here](https://github.com/krzysztofzablocki/Sourcery).
 
 [![](https://img.shields.io/github/v/release/fenli/SourceryBuildPlugin?style=flat&label=Latest%20Release&color=blue)](https://github.com/fenli/SourceryBuildPlugin/releases)
 [![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Ffenli%2FSourceryBuildPlugin%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/fenli/SourceryBuildPlugin)
 [![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Ffenli%2FSourceryBuildPlugin%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/fenli/SourceryBuildPlugin)
-[![](https://img.shields.io/github/license/fenli/SourceryBuildPlugin?style=flat)](https://www.apache.org/licenses/LICENSE-2.0.txt)
+[![](https://img.shields.io/github/license/fenli/SourceryBuildPlugin?style=flat)](https://github.com/fenli/SourceryBuildPlugin/blob/main/LICENSE)
 
 ## How to install
 ### SPM
@@ -32,22 +32,23 @@ Integration into Xcode project:
 - Go to Build Phase -> Run Build Tool Plug-ins -> Add the plugin
 
 ## Advantages
-Offering the plugins in a separate package has some advantages you should consider:
+Offering sourcery plugins in a separate package has some advantages you should consider:
 - No need to clone the whole Sourcery repository.
 - Sourcery itself is included as a binary dependency, thus the consumer doesn't need to build it first.
 - There are no other dependencies that need to be downloaded, resolved and compiled.
 - Sourcery binary version is autoupdated for every Sourcery release via pipeline.
+- Plugin runs in sanboxed environment so generated file is stored in intermediary build directory (it doesnt' change source directory).
 - Easily integrated into projects / packages since sourcery cli arguments is provided automatically:
 
 | Arguments           | Provided Value |
 |---------------------|----------------|
 | `--sources`         | Using target source root directory | 
-| `--templates`       | Using any stencils/swifttemplate files found in source root directory or subdirectories | 
+| `--templates`       | Using any stencils/swifttemplate files found in source root directory or sub-directories | 
 | `--output`          | Generated directory inside plugin work directory (sandboxed) | 
 | `--cacheBasePath`   | Generated directory inside plugin work directory (sandboxed) | 
 
-## Known limitation
-While this plugin has some benefits, it also has some drawbacks, for example:
-- Plugins run in sanboxed environment so it cannot change contents source directory.
-- Cannot passing arguments to templates file (eg: autoImport).
+## Limitations
+While this plugin has some benefits, it also comes with some drawbacks:
+- Plugins run in sanboxed environment, so it cannot change contents inside target source directory.
+- Cannot passing arguments to sourcery templates file (eg: `--args autoImports=...`).
 - Templates file must be provided for each target, cannot be centralized.
