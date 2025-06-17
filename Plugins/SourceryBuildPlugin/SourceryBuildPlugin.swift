@@ -5,76 +5,149 @@ import PackagePlugin
     import XcodeProjectPlugin
 #endif
 
-enum SourceryError: Error, CustomStringConvertible {
+enum SourceryPluginError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .templatesNotFound(let sourceDir):
-            return
-                "Could not find any templates files (*.stencil, *.swifttemplate) inside \(sourceDir)"
+            "Could not find any templates files (*.stencil, *.swifttemplate) inside \(sourceDir).\n"
+        case .configFileNotFound:
+            "Config file `.sourcery.yml` is not found in target source directory. CLI options will be used instead.\n"
+        case .invalidArgFile(let argFile):
+            "Could not read argument file at \(argFile).\n"
         }
     }
 
-    case templatesNotFound(String)
+    case invalidArgFile(argFile: String)
+    case templatesNotFound(sourceDir: String)
+    case configFileNotFound
 }
 
-struct SourceryArguments {
-    let sourceDirectory: URL
-    let outputDirectory: URL
-    let cacheDirectory: URL
-    let templateFiles: [URL]
+enum SourceryConfig {
+    case configFile(yml: URL, env: [String: String])
+    case cliOptions(args: SourceryCommandArguments)
 }
 
-struct SourceryCommandContext {
+struct SourceryCommandArguments {
+    let sources: URL
+    let templates: [URL]
+    let extraArgs: [String]
+}
+
+struct SourceryPluginContext {
     let targetName: String
     let sourcery: PluginContext.Tool
     let workDirectory: URL
-    let args: SourceryArguments
+    let generatedDirectory: URL
+    let cacheDirectory: URL
+    let config: SourceryConfig
 
-    init(
-        context: PluginContext,
-        target: PackagePlugin.Target
-    ) throws {
+    init(context: PluginContext, target: PackagePlugin.Target) {
         self.targetName = target.name
         self.sourcery = try! context.tool(named: "sourcery")
         self.workDirectory = URL(
             fileURLWithPath: context.pluginWorkDirectory.string
         )
-        let templates = target.findTemplateFiles()
-        guard !templates.isEmpty else {
-            throw SourceryError.templatesNotFound(target.directory.string)
+        self.generatedDirectory = workDirectory.appending(path: "Generated")
+        self.cacheDirectory = workDirectory.appending(path: "Cache")
+
+        let sourceRootDirectory = URL(fileURLWithPath: target.directory.string)
+        let packageRootDirectory =
+            sourceRootDirectory
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let configFile = sourceRootDirectory.appending(path: ".sourcery.yml")
+        if let configFile = configFile.ifExist() {
+            self.config = .configFile(
+                yml: configFile,
+                env: [
+                    "PACKAGE_ROOT_DIR": packageRootDirectory.path,
+                    "TARGET_SOURCE_DIR": sourceRootDirectory.path,
+                    "TARGET_OUTPUT_DIR": generatedDirectory.path,
+                    "TARGET_CACHE_DIR": cacheDirectory.path,
+                ]
+            )
+        } else {
+            Diagnostics.warning(
+                SourceryPluginError.configFileNotFound.description
+            )
+
+            let templates = target.inputFiles?.findTemplateFiles() ?? []
+            if templates.isEmpty {
+                Diagnostics.error(
+                    SourceryPluginError.templatesNotFound(
+                        sourceDir: sourceRootDirectory.path
+                    ).description
+                )
+            }
+
+            let extraArgs = SourceryArgFile.parse(
+                sourceRootDirectory.appending(
+                    path: ".sourcery.argfile"
+                )
+            )
+
+            self.config = .cliOptions(
+                args: .init(
+                    sources: sourceRootDirectory,
+                    templates: templates,
+                    extraArgs: extraArgs
+                )
+            )
         }
-        self.args = .init(
-            sourceDirectory: URL(fileURLWithPath: target.directory.string),
-            outputDirectory: workDirectory.appending(path: "Generated"),
-            cacheDirectory: workDirectory.appending(path: "Cache"),
-            templateFiles: templates
-        )
     }
 }
 
 #if canImport(XcodeProjectPlugin)
-    extension SourceryCommandContext {
+    extension SourceryPluginContext {
 
-        init(
-            context: XcodeProjectPlugin.XcodePluginContext,
-            target: XcodeProjectPlugin.XcodeTarget
-        ) throws {
+        init(context: XcodePluginContext, target: XcodeTarget) {
             self.targetName = target.displayName
             self.sourcery = try! context.tool(named: "sourcery")
             self.workDirectory = URL(
                 fileURLWithPath: context.pluginWorkDirectory.string
             )
-            let rootSourceDirectory = target.findSourceRootDirectory()
-            let templates = target.findTemplateFiles()
-            guard !templates.isEmpty else {
-                throw SourceryError.templatesNotFound(rootSourceDirectory.path)
+            self.generatedDirectory = workDirectory.appending(path: "Generated")
+            self.cacheDirectory = workDirectory.appending(path: "Cache")
+
+            let sourceRootDirectory = target
+                .inputFiles
+                .findSourceRootDirectory()
+            let configFile = target.inputFiles.findConfigFile()
+            if let configFile {
+                self.config = .configFile(
+                    yml: configFile,
+                    env: [
+                        "TARGET_SOURCE_DIR": sourceRootDirectory.path,
+                        "TARGET_OUTPUT_DIR": generatedDirectory.path,
+                        "TARGET_CACHE_DIR": cacheDirectory.path,
+                    ]
+                )
+            } else {
+                Diagnostics.warning(
+                    SourceryPluginError.configFileNotFound.description
+                )
+                let templates = target.inputFiles.findTemplateFiles()
+                if templates.isEmpty {
+                    Diagnostics.error(
+                        SourceryPluginError.templatesNotFound(
+                            sourceDir: sourceRootDirectory.path
+                        ).description
+                    )
+                }
+
+                let extraArgs = SourceryArgFile.parse(
+                    target.inputFiles.findArgFile()
+                )
+
+                self.config = .cliOptions(
+                    args: .init(
+                        sources: sourceRootDirectory,
+                        templates: templates,
+                        extraArgs: extraArgs
+                    )
+                )
             }
-            self.args = .init(
-                sourceDirectory: rootSourceDirectory,
-                outputDirectory: workDirectory.appending(path: "Generated"),
-                cacheDirectory: workDirectory.appending(path: "Cache"),
-                templateFiles: target.findTemplateFiles()
-            )
+
         }
     }
 #endif
@@ -86,69 +159,79 @@ struct SourceryBuildPlugin: BuildToolPlugin {
         context: PluginContext,
         target: Target
     ) async throws -> [Command] {
-        let sourceryContext: SourceryCommandContext = try .init(
+        let sourceryContext: SourceryPluginContext = .init(
             context: context,
             target: target
         )
         return [
             createCleanCommand(sourceryContext: sourceryContext),
             createSourceryBuildCommand(sourceryContext: sourceryContext),
-        ]
+        ].compactMap { $0 }
     }
 
     /// Clean previously-generated files
     private func createCleanCommand(
-        sourceryContext: SourceryCommandContext
-    ) -> Command {
-        return .prebuildCommand(
-            displayName:
-                "Clean previously-generated data for target \(sourceryContext.targetName)",
-            executable: .init("/bin/rm"),
-            arguments: ["-rf", sourceryContext.args.outputDirectory.path],
-            outputFilesDirectory: .init(
-                sourceryContext.workDirectory.path
+        sourceryContext: SourceryPluginContext
+    ) -> Command? {
+        switch sourceryContext.config {
+        case .configFile(_, _):
+            return nil
+        case .cliOptions(_):
+            return .prebuildCommand(
+                displayName:
+                    "Clean previously-generated data for target \(sourceryContext.targetName)",
+                executable: .init("/bin/rm"),
+                arguments: ["-rf", sourceryContext.generatedDirectory.path],
+                outputFilesDirectory: .init(
+                    sourceryContext.workDirectory.path
+                )
             )
-        )
+        }
     }
 
     /// Generate codes from latest changes
     private func createSourceryBuildCommand(
-        sourceryContext: SourceryCommandContext
+        sourceryContext: SourceryPluginContext
     ) -> Command {
         let cmd = "Generate sources for target: \(sourceryContext.targetName)"
-        let args = sourceryContext.args
-        let sourcesArgs = ["--sources", args.sourceDirectory.path]
-        let templateArgs = args.templateFiles.flatMap {
-            ["--templates", $0.path]
+        switch sourceryContext.config {
+        case .configFile(let yml, let env):
+            return .prebuildCommand(
+                displayName: cmd,
+                executable: sourceryContext.sourcery.path,
+                arguments: [
+                    "--config", yml.path,
+                    "--cacheBasePath", sourceryContext.cacheDirectory.path,
+                    "--verbose",
+                ],
+                environment: env,
+                outputFilesDirectory: Path(
+                    sourceryContext.generatedDirectory.path
+                )
+            )
+        case .cliOptions(let args):
+            let templateArgs = args.templates.flatMap {
+                ["--templates", $0.path]
+            }
+            return .prebuildCommand(
+                displayName: cmd,
+                executable: sourceryContext.sourcery.path,
+                arguments: [
+                    "--sources", args.sources.path,
+                    "--output", sourceryContext.generatedDirectory.path,
+                    "--cacheBasePath", sourceryContext.cacheDirectory.path,
+                ] + templateArgs + args.extraArgs,
+                outputFilesDirectory: Path(
+                    sourceryContext.generatedDirectory.path
+                )
+            )
         }
-        let outputArgs = ["--output", args.outputDirectory.path]
-        let cacheArgs = ["--cacheBasePath", args.cacheDirectory.path]
-        let extraArgs = ["--verbose"]
-
-        return .prebuildCommand(
-            displayName: cmd,
-            executable: sourceryContext.sourcery.path,
-            arguments: sourcesArgs + templateArgs + outputArgs + cacheArgs
-                + extraArgs,
-            outputFilesDirectory: .init(args.outputDirectory.path)
-        )
     }
 }
 
-extension PackagePlugin.Target {
-
-    var rootDirectory: URL {
-        URL(fileURLWithPath: self.directory.string, isDirectory: true)
-    }
-
-    var inputFiles: PackagePlugin.FileList? {
-        guard let target = self as? SourceModuleTarget else { return nil }
-        return target.sourceFiles
-    }
-
+extension PackagePlugin.FileList {
     func findSourceRootDirectory() -> URL {
-        guard let inputFiles = inputFiles else { return rootDirectory }
-        let allPaths = inputFiles.compactMap { file in
+        let allPaths = self.compactMap { file in
             URL(fileURLWithPath: file.path.string)
         }.filter {
             $0.pathExtension == "swift"
@@ -164,13 +247,90 @@ extension PackagePlugin.Target {
     }
 
     func findTemplateFiles() -> [URL] {
-        guard let inputFiles = inputFiles else { return [] }
-        return inputFiles.filter {
+        return self.filter {
             let ext = $0.path.extension
             return ext == "stencil" || ext == "swifttemplate"
         }.compactMap { file in
             URL(fileURLWithPath: file.path.string)
         }
+    }
+
+    func findConfigFile() -> URL? {
+        return self.filter {
+            return $0.path.lastComponent == ".sourcery.yml"
+        }.first.map { file in URL(fileURLWithPath: file.path.string) }
+    }
+
+    func findArgFile() -> URL? {
+        return self.filter {
+            return $0.path.lastComponent == ".sourcery.argfile"
+        }.first.map { file in URL(fileURLWithPath: file.path.string) }
+    }
+}
+
+extension PackagePlugin.Target {
+
+    var rootDirectory: URL {
+        URL(fileURLWithPath: self.directory.string, isDirectory: true)
+    }
+
+    var inputFiles: PackagePlugin.FileList? {
+        guard let target = self as? SourceModuleTarget else { return nil }
+        return target.sourceFiles
+    }
+}
+
+extension URL {
+    func ifExist() -> URL? {
+        return FileManager.default.fileExists(atPath: self.path) ? self : nil
+    }
+}
+
+enum SourceryArgFile {
+    static func parse(_ file: URL?) -> [String] {
+        guard let file = file?.ifExist() else { return ["--verbose"] }
+
+        guard let content = try? String(contentsOf: file, encoding: .utf8)
+        else {
+            Diagnostics.warning(
+                SourceryPluginError.invalidArgFile(argFile: file.path)
+                    .description
+            )
+            return ["--verbose"]
+        }
+
+        let ignoredFlags = [
+            "--sources",
+            "--templates",
+            "--output",
+            "--config",
+            "--cacheBasePath",
+        ]
+
+        let lines = content.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        var result: [String] = []
+        for line in lines {
+            guard line.hasPrefix("--") else { continue }
+
+            let components = line.split(separator: " ", maxSplits: 1).map(
+                String.init
+            )
+            guard let flag = components.first else { continue }
+
+            if ignoredFlags.contains(flag) {
+                continue
+            }
+
+            result.append(flag)
+
+            if components.count > 1 {
+                result.append(components[1])
+            }
+        }
+
+        return result
     }
 }
 
@@ -181,42 +341,14 @@ extension PackagePlugin.Target {
             context: XcodeProjectPlugin.XcodePluginContext,
             target: XcodeProjectPlugin.XcodeTarget
         ) throws -> [PackagePlugin.Command] {
-            let sourceryContext: SourceryCommandContext = try .init(
+            let sourceryContext: SourceryPluginContext = .init(
                 context: context,
                 target: target
             )
             return [
                 createCleanCommand(sourceryContext: sourceryContext),
                 createSourceryBuildCommand(sourceryContext: sourceryContext),
-            ]
-        }
-    }
-
-    extension XcodeProjectPlugin.XcodeTarget {
-
-        func findSourceRootDirectory() -> URL {
-            let allPaths = inputFiles.compactMap { file in
-                URL(fileURLWithPath: file.path.string)
-            }.filter {
-                $0.pathExtension == "swift"
-            }
-
-            let commonPrefix = allPaths.map {
-                $0.path
-            }.reduce(allPaths.first?.path ?? "") { prefix, path in
-                String(prefix.commonPrefix(with: path))
-            }
-
-            return URL(fileURLWithPath: commonPrefix, isDirectory: true)
-        }
-
-        func findTemplateFiles() -> [URL] {
-            return inputFiles.filter {
-                let ext = $0.path.extension
-                return ext == "stencil" || ext == "swifttemplate"
-            }.compactMap { file in
-                URL(fileURLWithPath: file.path.string)
-            }
+            ].compactMap { $0 }
         }
     }
 #endif
