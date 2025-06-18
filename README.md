@@ -49,7 +49,7 @@ This plugin will run with minimum setup with auto configuration.
 | `--output`          | Auto generated directory inside plugin work directory (sandboxed) | 
 | `--cacheBasePath`   | Auto generated directory inside plugin work directory (sandboxed) |
 
-**Optionally**, if you need to pass extra arguments (eg: `--args`) to sourcery cli, create `.sourcery.argfile` inside your target source directory.
+**Optionally**, if you need to pass extra arguments (other than those 4) to sourcery cli, create `.sourcery.argfile` inside your target source directory.
 Sample of valid `.sourcery.argfile`:
 
 ```argfile
@@ -60,6 +60,7 @@ Sample of valid `.sourcery.argfile`:
 ```
 
 > All auto provided arguments will be ignored if specified in the argfile.
+> See table below for the provided ENV variable that can be used on `.sourcery.argfile` file.
 
 ### With configuration file
 Create `.sourcery.yml` in the target source directory and it will be used instead of auto provided arguments. Read more regarding this format [here](https://krzysztofzablocki.github.io/Sourcery/usage.html). Sample of valid `.sourcery.yml`:
@@ -76,12 +77,13 @@ args:
 ```
 
 > It's required to use ENV variable for output since you cannot write to source directory in sandbox mode.
-> See below for the provided ENV variable that can be used on `.sourcery.yml` file.
+> See table below for the provided ENV variable that can be used on `.sourcery.yml` file.
 
+### Environment variables that are visible in `.sourcery.yml` and `.sourcery.argfile`
 | ENV                   | Value          |
 |-----------------------|----------------|
 | `PACKAGE_ROOT_DIR`    | Package root directory (not available in Xcode target) | 
 | `TARGET_SOURCE_DIR`   | Target source directory (PackageName -> Sources -> TargetName) | 
 | `TARGET_OUTPUT_DIR`   | Auto generated directory inside plugin work directory (sandboxed) | 
-| `TARGET_CACHE_DIR`    | Auto generated directory inside plugin work directory (sandboxed) |
-
+| `HOME`                | Home directory |
+| `USER`                | Logged username |

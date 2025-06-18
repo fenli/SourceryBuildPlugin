@@ -24,7 +24,7 @@ enum SourceryPluginError: Error, CustomStringConvertible {
 
 enum SourceryConfig {
     case configFile(yml: URL, env: [String: String])
-    case cliOptions(args: SourceryCommandArguments)
+    case cliOptions(args: SourceryCommandArguments, env: [String: String])
 }
 
 struct SourceryCommandArguments {
@@ -55,16 +55,21 @@ struct SourceryPluginContext {
             sourceRootDirectory
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+
+        let systemEnv = ProcessInfo.processInfo.environment
+            .filter { key, _ in key == "HOME" || key == "USER" }
+        let env = [
+            "PACKAGE_ROOT_DIR": packageRootDirectory.path,
+            "TARGET_SOURCE_DIR": sourceRootDirectory.path,
+            "TARGET_OUTPUT_DIR": generatedDirectory.path,
+            "TARGET_CACHE_DIR": cacheDirectory.path,
+        ].merging(systemEnv) { old, new in new }
+
         let configFile = sourceRootDirectory.appending(path: ".sourcery.yml")
         if let configFile = configFile.ifExist() {
             self.config = .configFile(
                 yml: configFile,
-                env: [
-                    "PACKAGE_ROOT_DIR": packageRootDirectory.path,
-                    "TARGET_SOURCE_DIR": sourceRootDirectory.path,
-                    "TARGET_OUTPUT_DIR": generatedDirectory.path,
-                    "TARGET_CACHE_DIR": cacheDirectory.path,
-                ]
+                env: env
             )
         } else {
             Diagnostics.warning(
@@ -80,18 +85,18 @@ struct SourceryPluginContext {
                 )
             }
 
-            let extraArgs = SourceryArgFile.parse(
-                sourceRootDirectory.appending(
-                    path: ".sourcery.argfile"
-                )
+            let argFile = sourceRootDirectory.appending(
+                path: ".sourcery.argfile"
             )
+            let extraArgs = SourceryArgFile.parse(file: argFile, env: env)
 
             self.config = .cliOptions(
                 args: .init(
                     sources: sourceRootDirectory,
                     templates: templates,
                     extraArgs: extraArgs
-                )
+                ),
+                env: env
             )
         }
     }
@@ -112,15 +117,20 @@ struct SourceryPluginContext {
             let sourceRootDirectory = target
                 .inputFiles
                 .findSourceRootDirectory()
+
+            let systemEnv = ProcessInfo.processInfo.environment
+                .filter { key, _ in key == "HOME" || key == "USER" }
+            let env = [
+                "TARGET_SOURCE_DIR": sourceRootDirectory.path,
+                "TARGET_OUTPUT_DIR": generatedDirectory.path,
+                "TARGET_CACHE_DIR": cacheDirectory.path,
+            ].merging(systemEnv) { old, new in new }
+
             let configFile = target.inputFiles.findConfigFile()
             if let configFile {
                 self.config = .configFile(
                     yml: configFile,
-                    env: [
-                        "TARGET_SOURCE_DIR": sourceRootDirectory.path,
-                        "TARGET_OUTPUT_DIR": generatedDirectory.path,
-                        "TARGET_CACHE_DIR": cacheDirectory.path,
-                    ]
+                    env: env
                 )
             } else {
                 Diagnostics.warning(
@@ -136,7 +146,8 @@ struct SourceryPluginContext {
                 }
 
                 let extraArgs = SourceryArgFile.parse(
-                    target.inputFiles.findArgFile()
+                    file: target.inputFiles.findArgFile(),
+                    env: env
                 )
 
                 self.config = .cliOptions(
@@ -144,7 +155,8 @@ struct SourceryPluginContext {
                         sources: sourceRootDirectory,
                         templates: templates,
                         extraArgs: extraArgs
-                    )
+                    ),
+                    env: env
                 )
             }
 
@@ -176,7 +188,7 @@ struct SourceryBuildPlugin: BuildToolPlugin {
         switch sourceryContext.config {
         case .configFile(_, _):
             return nil
-        case .cliOptions(_):
+        case .cliOptions(_, _):
             return .prebuildCommand(
                 displayName:
                     "Clean previously-generated data for target \(sourceryContext.targetName)",
@@ -209,7 +221,9 @@ struct SourceryBuildPlugin: BuildToolPlugin {
                     sourceryContext.generatedDirectory.path
                 )
             )
-        case .cliOptions(let args):
+        case .cliOptions(let args, let env):
+            let extraArgs =
+                args.extraArgs.isEmpty ? ["--verbose"] : args.extraArgs
             let templateArgs = args.templates.flatMap {
                 ["--templates", $0.path]
             }
@@ -220,7 +234,8 @@ struct SourceryBuildPlugin: BuildToolPlugin {
                     "--sources", args.sources.path,
                     "--output", sourceryContext.generatedDirectory.path,
                     "--cacheBasePath", sourceryContext.cacheDirectory.path,
-                ] + templateArgs + args.extraArgs,
+                ] + templateArgs + extraArgs,
+                environment: env,
                 outputFilesDirectory: Path(
                     sourceryContext.generatedDirectory.path
                 )
@@ -287,8 +302,8 @@ extension URL {
 }
 
 enum SourceryArgFile {
-    static func parse(_ file: URL?) -> [String] {
-        guard let file = file?.ifExist() else { return ["--verbose"] }
+    static func parse(file: URL?, env: [String: String]) -> [String] {
+        guard let file = file?.ifExist() else { return [] }
 
         guard let content = try? String(contentsOf: file, encoding: .utf8)
         else {
@@ -296,16 +311,43 @@ enum SourceryArgFile {
                 SourceryPluginError.invalidArgFile(argFile: file.path)
                     .description
             )
-            return ["--verbose"]
+            return []
         }
 
         let ignoredFlags = [
             "--sources",
             "--templates",
             "--output",
-            "--config",
             "--cacheBasePath",
         ]
+
+        func expandEnvironmentVariables(in text: String) -> String {
+            let pattern = #"\$\{([^}]+)\}"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else {
+                return text
+            }
+
+            let nsrange = NSRange(text.startIndex..<text.endIndex, in: text)
+            var result = text
+
+            regex.enumerateMatches(
+                in: text,
+                options: [],
+                range: nsrange
+            ) { match, _, _ in
+                guard let match = match,
+                    let range = Range(match.range(at: 0), in: result),
+                    let keyRange = Range(match.range(at: 1), in: result)
+                else { return }
+
+                let key = String(result[keyRange])
+                let value = env[key] ?? ""
+
+                result.replaceSubrange(range, with: value)
+            }
+
+            return result
+        }
 
         let lines = content.split(separator: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -326,7 +368,8 @@ enum SourceryArgFile {
             result.append(flag)
 
             if components.count > 1 {
-                result.append(components[1])
+                let expanded = expandEnvironmentVariables(in: components[1])
+                result.append(expanded)
             }
         }
 
