@@ -32,7 +32,11 @@ Integration into Xcode project:
 - Go to Build Phase -> Run Build Tool Plug-ins -> Add the plugin
 
 ### Build on CI
-If you are building on CI server, you have to add `-skipPackagePluginValidation` to the xcodebuild command arguments to bypass xcode validation.
+If you are building on CI server, you have to add this as the xcodebuild command arguments to bypass xcode validation:
+```
+-skipPackagePluginValidation
+-skipMacroValidation
+```
 Or if you are building on Xcode Cloud, you can disable it by adding this to `ci_scripts/ci_post_clone.sh`:
 ```sh
 defaults write com.apple.dt.Xcode IDESkipPackagePluginFingerprintValidatation -bool YES
@@ -67,6 +71,7 @@ Sample of valid `.sourcery.argfile`:
 --verbose
 ```
 
+> [!NOTE]
 > All auto provided arguments will be ignored if specified in the argfile.
 > See table below for the provided ENV variable that can be used on `.sourcery.argfile` file.
 
@@ -84,10 +89,12 @@ args:
   autoImports: ["SwiftUI"]
 ```
 
+> [!NOTE]
 > It's required to use ENV variable for output since you cannot write to source directory in sandbox mode.
 > See table below for the provided ENV variable that can be used on `.sourcery.yml` file.
 
-### Environment variables that are visible in `.sourcery.yml` and `.sourcery.argfile`
+### Environment variables
+These are environment variables that are visible in `.sourcery.yml` and `.sourcery.argfile`
 | ENV                   | Value          |
 |-----------------------|----------------|
 | `PACKAGE_ROOT_DIR`    | Package root directory (not available in Xcode target) | 
