@@ -31,6 +31,14 @@ Integration into Xcode project:
 - Select target to integrate (usually app or library target).
 - Go to Build Phase -> Run Build Tool Plug-ins -> Add the plugin
 
+### Build on CI
+If you are building on CI server, you have to add `-skipPackagePluginValidation` to the xcodebuild command arguments to bypass xcode validation.
+Or if you are building on Xcode Cloud, you can disable it by adding this to `ci_scripts/ci_post_clone.sh`:
+```sh
+defaults write com.apple.dt.Xcode IDESkipPackagePluginFingerprintValidatation -bool YES
+defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES
+```
+
 ## Advantages
 Offering sourcery plugins in a separate package has some advantages you should consider:
 - No need to clone the whole Sourcery repository.
