@@ -50,11 +50,10 @@ struct SourceryPluginContext {
         self.generatedDirectory = workDirectory.appending(path: "Generated")
         self.cacheDirectory = workDirectory.appending(path: "Cache")
 
+        let packageRootDirectory = URL(
+            fileURLWithPath: context.package.directory.string
+        )
         let sourceRootDirectory = URL(fileURLWithPath: target.directory.string)
-        let packageRootDirectory =
-            sourceRootDirectory
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
 
         let systemEnv = ProcessInfo.processInfo.environment
             .filter { key, _ in key == "HOME" || key == "USER" }
@@ -114,6 +113,9 @@ struct SourceryPluginContext {
             self.generatedDirectory = workDirectory.appending(path: "Generated")
             self.cacheDirectory = workDirectory.appending(path: "Cache")
 
+            let projectRootDirectory = URL(
+                fileURLWithPath: context.xcodeProject.directory.string
+            )
             let sourceRootDirectory = target
                 .inputFiles
                 .findSourceRootDirectory()
@@ -121,6 +123,7 @@ struct SourceryPluginContext {
             let systemEnv = ProcessInfo.processInfo.environment
                 .filter { key, _ in key == "HOME" || key == "USER" }
             let env = [
+                "PROJECT_ROOT_DIR": projectRootDirectory.path,
                 "TARGET_SOURCE_DIR": sourceRootDirectory.path,
                 "TARGET_OUTPUT_DIR": generatedDirectory.path,
                 "TARGET_CACHE_DIR": cacheDirectory.path,

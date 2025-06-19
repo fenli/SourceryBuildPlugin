@@ -97,8 +97,10 @@ args:
 These are environment variables that are visible in `.sourcery.yml` and `.sourcery.argfile`
 | ENV                   | Value          |
 |-----------------------|----------------|
-| `PACKAGE_ROOT_DIR`    | Package root directory (not available in Xcode target) | 
-| `TARGET_SOURCE_DIR`   | Target source directory (PackageName -> Sources -> TargetName) | 
-| `TARGET_OUTPUT_DIR`   | Auto generated directory inside plugin work directory (sandboxed) | 
+| `PROJECT_ROOT_DIR`    | Project root directory (Xcode target only) |
+| `PACKAGE_ROOT_DIR`    | Package root directory (Swift package target only) |
+| `TARGET_SOURCE_DIR`   | Target source directory (PackageName -> Sources -> TargetName) |
+| `TARGET_OUTPUT_DIR`   | Auto generated directory inside plugin work directory (sandboxed) |
+| `TARGET_CACHE_DIR`    | Auto generated directory inside plugin work directory (sandboxed) |
 | `HOME`                | Home directory |
 | `USER`                | Logged username |
