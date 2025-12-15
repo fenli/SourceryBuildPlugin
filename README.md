@@ -12,9 +12,11 @@
 Add this configuration to your `Package.swift`:
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fenli/SourceryBuildPlugin", .branch("main")),
+    .package(url: "https://github.com/fenli/SourceryBuildPlugin", from: "2.3.0"),
 ],
 ```
+> *This package version will follow [Sourcery binary versioning](https://github.com/krzysztofzablocki/Sourcery/releases)*
+
 Then add the plugins to your target:
 ```swift
 .target(
