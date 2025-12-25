@@ -13,41 +13,38 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Check for latest release
-      id: fetch_latest
       run: |
         latest_release=$(curl --silent "https://api.github.com/repos/krzysztofzablocki/Sourcery/releases/latest" | jq -r '.tag_name')
         echo "Latest release: $latest_release"
-        echo "::set-output name=latest_release::$latest_release"
+        echo "LATEST_RELEASE=$latest_release" >> $GITHUB_ENV
 
         binary_url="https://github.com/krzysztofzablocki/Sourcery/releases/download/${latest_release}/sourcery-${latest_release}.artifactbundle.zip"
         checksum=$(curl -L $binary_url | shasum -a 256 | awk '{ print $1 }')
         echo "Binary URL: $binary_url"
         echo "Checksum: $checksum"
-        echo "::set-output name=binary_url::$binary_url"
-        echo "::set-output name=checksum::$checksum"
+        echo "BINARY_URL=$binary_url" >> $GITHUB_ENV
+        echo "BINARY_CHECKSUM=$checksum" >> $GITHUB_ENV
 
     - name: Update Package.swift
-      id: update_package_swift
+      if: env.LATEST_RELEASE != 'null'
       run: |
-        binary_url=${{ steps.fetch_latest.outputs.binary_url }}
-        checksum=${{ steps.fetch_latest.outputs.checksum }}
-        sed -i 's|url: "https://github.com/krzysztofzablocki/Sourcery/releases/download/.*"|url: "'"${binary_url}"'"|' Package.swift
-        sed -i 's|checksum: ".*"|checksum: "'"${checksum}"'"|' Package.swift
+        sed -i 's|url: "https://github.com/krzysztofzablocki/Sourcery/releases/download/.*"|url: "'"${BINARY_URL}"'"|' Package.swift
+        sed -i 's|checksum: ".*"|checksum: "'"${BINARY_CHECKSUM}"'"|' Package.swift
         if git diff --quiet; then
           echo "No changes detected"
-          echo "::set-output name=changes_detected::false"
+          echo "CHANGES_DETECTED=false" >> $GITHUB_ENV
         else
           echo "Changes detected"
-          echo "::set-output name=changes_detected::true"
+          echo "CHANGES_DETECTED=true" >> $GITHUB_ENV
         fi
 
     - name: Commit and Push changes
-      if: steps.update_package_swift.outputs.changes_detected == 'true'
+      if: env.CHANGES_DETECTED == 'true'
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         git add Package.swift
-        git commit -m "Update Sourcery binary version to ${{ steps.fetch_latest.outputs.latest_release }}"
+        git commit -m "Update Sourcery binary version to $LATEST_RELEASE"
         git push
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
